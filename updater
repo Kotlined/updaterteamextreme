@@ -1,0 +1,149 @@
+ protected void downloadJars(String path) throws Exception {
+/* 441 */     File versionFile = new File(path, "md5s");
+/* 442 */     Properties md5s = new Properties();
+/* 443 */     if (versionFile.exists()) {
+/*     */       try {
+/* 445 */         FileInputStream fis = new FileInputStream(versionFile);
+/* 446 */         md5s.load(fis);
+/* 447 */         fis.close();
+/* 448 */       } catch (Exception e) {
+/* 449 */         e.printStackTrace();
+/*     */       } 
+/*     */     }
+/* 452 */     this.state = 4;
+/*     */ 
+/*     */ 
+/*     */ 
+/*     */     
+/* 457 */     int[] fileSizes = new int[this.urlList.length];
+/* 458 */     boolean[] skip = new boolean[this.urlList.length];
+/*     */ 
+/*     */     
+/* 461 */     for (int i = 0; i < this.urlList.length; i++) {
+/* 462 */       URLConnection urlconnection = this.urlList[i].openConnection();
+/* 463 */       urlconnection.setDefaultUseCaches(false);
+/* 464 */       skip[i] = false;
+/* 465 */       if (urlconnection instanceof HttpURLConnection) {
+/* 466 */         ((HttpURLConnection)urlconnection).setRequestMethod("HEAD");
+/*     */         
+/* 468 */         String etagOnDisk = "\"" + md5s.getProperty(getFileName(this.urlList[i])) + "\"";
+/*     */         
+/* 470 */         if (!forceUpdate && etagOnDisk != null) urlconnection.setRequestProperty("If-None-Match", etagOnDisk);
+/*     */         
+/* 472 */         int code = ((HttpURLConnection)urlconnection).getResponseCode();
+/* 473 */         if (code / 100 == 3) {
+/* 474 */           skip[i] = true;
+/*     */         }
+/*     */       } 
+/* 477 */       fileSizes[i] = urlconnection.getContentLength();
+/* 478 */       this.totalSizeDownload += fileSizes[i];
+/*     */     } 
+/*     */ 
+/*     */     
+/* 482 */     int initialPercentage = this.percentage = 10;
+/*     */ 
+/*     */     
+/* 485 */     byte[] buffer = new byte[65536];
+/* 486 */     for (int j = 0; j < this.urlList.length; j++) {
+/* 487 */       if (skip[j]) {
+/* 488 */         this.percentage = initialPercentage + fileSizes[j] * 45 / this.totalSizeDownload;
+/*     */       } else {
+/*     */ 
+/*     */         
+/*     */         try {
+/*     */ 
+/*     */           
+/* 495 */           md5s.remove(getFileName(this.urlList[j]));
+/* 496 */           md5s.store(new FileOutputStream(versionFile), "md5 hashes for downloaded files");
+/* 497 */         } catch (Exception e) {
+/* 498 */           e.printStackTrace();
+/*     */         } 
+/*     */         
+/* 501 */         int unsuccessfulAttempts = 0;
+/* 502 */         int maxUnsuccessfulAttempts = 3;
+/* 503 */         boolean downloadFile = true;
+/*     */ 
+/*     */         
+/* 506 */         while (downloadFile) {
+/* 507 */           downloadFile = false;
+/*     */           
+/* 509 */           URLConnection urlconnection = this.urlList[j].openConnection();
+/*     */           
+/* 511 */           String etag = "";
+/*     */           
+/* 513 */           if (urlconnection instanceof HttpURLConnection) {
+/* 514 */             urlconnection.setRequestProperty("Cache-Control", "no-cache");
+/*     */             
+/* 516 */             urlconnection.connect();
+/*     */ 
+/*     */             
+/* 519 */             etag = urlconnection.getHeaderField("ETag");
+/* 520 */             etag = etag.substring(1, etag.length() - 1);
+/*     */           } 
+/*     */           
+/* 523 */           String currentFile = getFileName(this.urlList[j]);
+/* 524 */           InputStream inputstream = getJarInputStream(currentFile, urlconnection);
+/* 525 */           FileOutputStream fos = new FileOutputStream(String.valueOf(path) + currentFile);
+/*     */ 
+/*     */ 
+/*     */           
+/* 529 */           long downloadStartTime = System.currentTimeMillis();
+/* 530 */           int downloadedAmount = 0;
+/* 531 */           int fileSize = 0;
+/* 532 */           String downloadSpeedMessage = "";
+/*     */           
+/* 534 */           MessageDigest m = MessageDigest.getInstance("MD5"); int bufferSize;
+/* 535 */           while ((bufferSize = inputstream.read(buffer, 0, buffer.length)) != -1) {
+/* 536 */             fos.write(buffer, 0, bufferSize);
+/* 537 */             m.update(buffer, 0, bufferSize);
+/* 538 */             this.currentSizeDownload += bufferSize;
+/* 539 */             fileSize += bufferSize;
+/* 540 */             this.percentage = initialPercentage + this.currentSizeDownload * 45 / this.totalSizeDownload;
+/* 541 */             this.subtaskMessage = "Retrieving: " + currentFile + " " + (this.currentSizeDownload * 100 / this.totalSizeDownload) + "%";
+/*     */             
+/* 543 */             downloadedAmount += bufferSize;
+/* 544 */             long timeLapse = System.currentTimeMillis() - downloadStartTime;
+/*     */             
+/* 546 */             if (timeLapse >= 1000L) {
+/* 547 */               float downloadSpeed = downloadedAmount / (float)timeLapse;
+/* 548 */               downloadSpeed = (int)(downloadSpeed * 100.0F) / 100.0F;
+/* 549 */               downloadSpeedMessage = " @ " + downloadSpeed + " KB/sec";
+/* 550 */               downloadedAmount = 0;
+/* 551 */               downloadStartTime += 1000L;
+/*     */             } 
+/*     */             
+/* 554 */             this.subtaskMessage = String.valueOf(this.subtaskMessage) + downloadSpeedMessage;
+/*     */           } 
+/*     */           
+/* 557 */           inputstream.close();
+/* 558 */           fos.close();
+/* 559 */           String md5 = (new BigInteger(1, m.digest())).toString(16);
+/* 560 */           while (md5.length() < 32) {
+/* 561 */             md5 = "0" + md5;
+/*     */           }
+/* 563 */           boolean md5Matches = true;
+/* 564 */           if (etag != null) {
+/* 565 */             md5Matches = md5.equals(etag);
+/*     */           }
+/*     */           
+/* 568 */           if (urlconnection instanceof HttpURLConnection) {
+/* 569 */             if (md5Matches && (fileSize == fileSizes[j] || fileSizes[j] <= 0)) {
+/*     */               
+/*     */               try {
+/* 572 */                 md5s.setProperty(getFileName(this.urlList[j]), etag);
+/* 573 */                 md5s.store(new FileOutputStream(versionFile), "md5 hashes for downloaded files");
+/* 574 */               } catch (Exception e) {
+/* 575 */                 e.printStackTrace();
+/*     */               }  continue;
+/*     */             } 
+/* 578 */             unsuccessfulAttempts++;
+/* 579 */             if (unsuccessfulAttempts < maxUnsuccessfulAttempts) {
+/* 580 */               downloadFile = true;
+/* 581 */               this.currentSizeDownload -= fileSize; continue;
+/*     */             } 
+/* 583 */             throw new Exception("failed to download " + currentFile);
+/*     */           } 
+/*     */         } 
+/*     */       } 
+/*     */     } 
+/*     */ 
